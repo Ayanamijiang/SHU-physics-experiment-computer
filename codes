@@ -1,0 +1,585 @@
+import tkinter as tk
+from tkinter import ttk, messagebox, scrolledtext
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from scipy.interpolate import CubicSpline
+
+
+# ========== 设置现代样式 ==========
+def set_modern_style():
+    style = ttk.Style()
+    style.theme_use('clam')
+    bg_color = "#f5f7fa"
+    fg_color = "#1e2a3e"
+    style.configure('.', background=bg_color, foreground=fg_color, font=('微软雅黑', 10))
+    style.configure('TLabel', background=bg_color, foreground=fg_color)
+    style.configure('TFrame', background=bg_color)
+    style.configure('TLabelframe', background=bg_color, foreground=fg_color,
+                    relief='flat', borderwidth=1, bordercolor='#e2e8f0')
+    style.configure('TLabelframe.Label', background=bg_color, foreground='#1e466e', font=('微软雅黑', 10, 'bold'))
+    style.configure('TButton', background='#ffffff', foreground=fg_color, borderwidth=1,
+                    relief='flat', padding=6, font=('微软雅黑', 10, 'bold'))
+    style.map('TButton', background=[('active', '#e2e8f0'), ('pressed', '#cbd5e1')])
+    style.configure('TCheckbutton', background=bg_color, foreground=fg_color, font=('微软雅黑', 10))
+    style.configure('TNotebook', background=bg_color, borderwidth=0)
+    style.configure('TNotebook.Tab', background='#e2e8f0', padding=[10, 4], font=('微软雅黑', 10))
+    style.map('TNotebook.Tab', background=[('selected', '#ffffff')])
+    return style
+
+
+class CoolingExperimentApp:
+    def __init__(self, root):
+        self.root = root
+        root.title("冷却法测金属比热容 - 最终修正版")
+        root.geometry("1400x1000")
+        root.configure(bg='#f5f7fa')
+
+        self.style = set_modern_style()
+
+        # 主卡片
+        main_card = tk.Frame(root, bg='#ffffff', relief='flat', bd=0)
+        main_card.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+
+        # 左侧输入区域
+        left_notebook = ttk.Notebook(main_card, width=600)
+        left_notebook.pack(side=tk.LEFT, fill=tk.BOTH, expand=False, padx=(0, 15))
+
+        frame_cooling = ttk.Frame(left_notebook)
+        frame_sample = ttk.Frame(left_notebook)
+        left_notebook.add(frame_cooling, text="1. 铜冷却数据 (表21.1)")
+        left_notebook.add(frame_sample, text="2. 金属样品数据 (表21.2)")
+
+        # ========== 冷却数据页 ==========
+        tip_label = ttk.Label(frame_cooling, text="⚠ 数字请用逗号或空格分隔，例如: 0,30,60 或 0 30 60",
+                              foreground="#f97316")
+        tip_label.grid(row=0, column=0, columnspan=2, pady=(5, 0), sticky="w", padx=10)
+
+        ttk.Label(frame_cooling, text="时间 t (s):", font=('微软雅黑', 10, 'bold')).grid(row=1, column=0, sticky="w",
+                                                                                         padx=10, pady=(10, 2))
+        self.time_entry = tk.Text(frame_cooling, height=4, width=55, font=('Consolas', 9), wrap=tk.WORD, bg='#f8fafc',
+                                  relief='flat', borderwidth=1)
+        self.time_entry.grid(row=2, column=0, columnspan=2, padx=10, pady=(0, 10), sticky="ew")
+        self.time_entry.insert(tk.END, "0,30,60,90,120,150,180,210,240,270,300,330,360,390,420,450,480,510,540,570")
+
+        ttk.Label(frame_cooling, text="光标位置 d (格):", font=('微软雅黑', 10, 'bold')).grid(row=3, column=0,
+                                                                                              sticky="w", padx=10,
+                                                                                              pady=(10, 2))
+        self.d_entry = tk.Text(frame_cooling, height=4, width=55, font=('Consolas', 9), wrap=tk.WORD, bg='#f8fafc',
+                               relief='flat', borderwidth=1)
+        self.d_entry.grid(row=4, column=0, columnspan=2, padx=10, pady=(0, 10), sticky="ew")
+        self.d_entry.insert(tk.END,
+                            "55, 37.5, 22.5, 9, -1, -9.5, -17, -22.5, -28, -32, -35.5, -39, -41, -43.5, -45.5, -47.5, -49, -50, -51, -52")
+
+        # 参数区域
+        param_frame = ttk.LabelFrame(frame_cooling, text="转换参数", padding=10)
+        param_frame.grid(row=5, column=0, columnspan=2, padx=10, pady=10, sticky="ew")
+
+        ttk.Label(param_frame, text="室温 θ₀ (℃):").grid(row=0, column=0, sticky="w", padx=5, pady=2)
+        self.theta0_entry = ttk.Entry(param_frame, width=15)
+        self.theta0_entry.grid(row=0, column=1, padx=5, pady=2)
+        self.theta0_entry.insert(0, "20.0")
+
+        ttk.Label(param_frame, text="定标系数 k (℃/格):").grid(row=1, column=0, sticky="w", padx=5, pady=2)
+        self.k_label = ttk.Label(param_frame, text="1.0 (固定)", foreground="#3b82f6")
+        self.k_label.grid(row=1, column=1, sticky="w", padx=5, pady=2)
+
+        ttk.Label(param_frame, text="零位 d₀ (格):").grid(row=2, column=0, sticky="w", padx=5, pady=2)
+        self.d0_entry = ttk.Entry(param_frame, width=15)
+        self.d0_entry.grid(row=2, column=1, padx=5, pady=2)
+        self.d0_entry.insert(0, "-60.0")
+
+        ttk.Label(param_frame, text="温差公式: Δθ = k × (d - d₀)", foreground="#64748b").grid(row=3, column=0,
+                                                                                              columnspan=2, pady=(5, 0))
+
+        # 图形选项
+        display_frame = ttk.LabelFrame(frame_cooling, text="图形显示选项", padding=10)
+        display_frame.grid(row=6, column=0, columnspan=2, padx=10, pady=10, sticky="ew")
+        self.show_all_points = tk.BooleanVar(value=False)
+        ttk.Checkbutton(display_frame, text="显示所有实验点（蓝色圆点）", variable=self.show_all_points).grid(row=0,
+                                                                                                            column=0,
+                                                                                                            sticky="w")
+        ttk.Label(display_frame, text="（不勾选则只显示样条曲线、切点及切线）", foreground="#64748b").grid(row=0, column=1,
+                                                                                                        padx=10)
+
+        ttk.Label(display_frame, text="均匀切点数量:").grid(row=1, column=0, sticky="w", padx=5, pady=5)
+        self.n_points_entry = ttk.Entry(display_frame, width=10)
+        self.n_points_entry.grid(row=1, column=1, sticky="w", padx=5, pady=5)
+        self.n_points_entry.insert(0, "5")
+
+        # ========== 样品数据页 ==========
+        cu_frame = ttk.LabelFrame(frame_sample, text="铜 (参考样品)", padding=8)
+        cu_frame.pack(fill=tk.X, padx=10, pady=10)
+        ttk.Label(cu_frame, text="质量 m_Cu (g):").grid(row=0, column=0, sticky="w", padx=5, pady=2)
+        self.mCu_entry = ttk.Entry(cu_frame, width=20)
+        self.mCu_entry.grid(row=0, column=1, padx=5, pady=2)
+        self.mCu_entry.insert(0, "3.16")
+        ttk.Label(cu_frame, text="Δt₁,Δt₂,Δt₃ (s)  (102℃→98℃):").grid(row=1, column=0, sticky="w", padx=5, pady=2)
+        self.dtCu_entry = ttk.Entry(cu_frame, width=20)
+        self.dtCu_entry.grid(row=1, column=1, padx=5, pady=2)
+        self.dtCu_entry.insert(0, "8.02,7.96,7.89")
+
+        fe_frame = ttk.LabelFrame(frame_sample, text="铁", padding=8)
+        fe_frame.pack(fill=tk.X, padx=10, pady=10)
+        ttk.Label(fe_frame, text="质量 m_Fe (g):").grid(row=0, column=0, sticky="w", padx=5, pady=2)
+        self.mFe_entry = ttk.Entry(fe_frame, width=20)
+        self.mFe_entry.grid(row=0, column=1, padx=5, pady=2)
+        self.mFe_entry.insert(0, "2.84")
+        ttk.Label(fe_frame, text="Δt₁,Δt₂,Δt₃ (s)  (102℃→98℃):").grid(row=1, column=0, sticky="w", padx=5, pady=2)
+        self.dtFe_entry = ttk.Entry(fe_frame, width=20)
+        self.dtFe_entry.grid(row=1, column=1, padx=5, pady=2)
+        self.dtFe_entry.insert(0, "7.59,7.73,7.92")
+
+        al_frame = ttk.LabelFrame(frame_sample, text="铝", padding=8)
+        al_frame.pack(fill=tk.X, padx=10, pady=10)
+        ttk.Label(al_frame, text="质量 m_Al (g):").grid(row=0, column=0, sticky="w", padx=5, pady=2)
+        self.mAl_entry = ttk.Entry(al_frame, width=20)
+        self.mAl_entry.grid(row=0, column=1, padx=5, pady=2)
+        self.mAl_entry.insert(0, "1.09")
+        ttk.Label(al_frame, text="Δt₁,Δt₂,Δt₃ (s)  (102℃→98℃):").grid(row=1, column=0, sticky="w", padx=5, pady=2)
+        self.dtAl_entry = ttk.Entry(al_frame, width=20)
+        self.dtAl_entry.grid(row=1, column=1, padx=5, pady=2)
+        self.dtAl_entry.insert(0, "7.14,6.94,7.03")
+
+        self.calc_btn = ttk.Button(frame_sample, text="▶ 开始完整计算 ◀", command=self.calculate_all, width=30)
+        self.calc_btn.pack(pady=20)
+
+        # ========== 右侧结果区域 ==========
+        right_frame = ttk.Frame(main_card)
+        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+
+        text_card = tk.Frame(right_frame, bg='#ffffff', relief='flat', bd=0)
+        text_card.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        self.result_text = scrolledtext.ScrolledText(text_card, font=('Consolas', 9), wrap=tk.NONE, bg='#f8fafc',
+                                                     fg='#0f172a',
+                                                     relief='flat', borderwidth=1)
+        self.result_text.pack(fill=tk.BOTH, expand=True)
+
+        graph_card = tk.Frame(right_frame, bg='#ffffff', relief='flat', bd=0)
+        graph_card.pack(fill=tk.BOTH, expand=True)
+        self.notebook = ttk.Notebook(graph_card)
+        self.notebook.pack(fill=tk.BOTH, expand=True)
+
+        self.fig1 = plt.Figure(figsize=(5.5, 4), dpi=100, facecolor='#f5f7fa')
+        self.ax1 = self.fig1.add_subplot(111)
+        self.canvas1 = FigureCanvasTkAgg(self.fig1, self.notebook)
+        self.canvas1.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        self.fig2 = plt.Figure(figsize=(5.5, 4), dpi=100, facecolor='#f5f7fa')
+        self.ax2 = self.fig2.add_subplot(111)
+        self.canvas2 = FigureCanvasTkAgg(self.fig2, self.notebook)
+        self.canvas2.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        self.notebook.add(self.canvas1.get_tk_widget(), text="冷却曲线 (样条插值)")
+        self.notebook.add(self.canvas2.get_tk_widget(), text="双对数坐标图")
+
+        main_card.columnconfigure(1, weight=1)
+        main_card.rowconfigure(0, weight=1)
+        right_frame.columnconfigure(0, weight=1)
+        right_frame.rowconfigure(0, weight=1)
+        right_frame.rowconfigure(1, weight=1)
+
+    # ========== 工具函数 ==========
+    def parse_float_list(self, text, field_name="数据"):
+        text = text.replace('，', ',')
+        for sep in [',', ';', '\t', '\n', '\r']:
+            text = text.replace(sep, ' ')
+        parts = text.split()
+        if not parts:
+            raise ValueError(f"{field_name} 不能为空")
+        result = []
+        for part in parts:
+            try:
+                result.append(float(part))
+            except ValueError:
+                raise ValueError(f"{field_name} 中包含无法识别的字符: '{part}'")
+        return result
+
+    def format_table(self, headers, rows, col_widths=None):
+        """格式化表格，支持中英文混排，每个中文字符宽度算2"""
+        if not rows:
+            return "无数据\n"
+        n_cols = len(headers)
+
+        # 计算每列最大显示宽度（字符数，中文字符算2）
+        def display_width(s):
+            width = 0
+            for ch in str(s):
+                if '\u4e00' <= ch <= '\u9fff':  # 中文字符范围
+                    width += 2
+                else:
+                    width += 1
+            return width
+
+        if col_widths is None:
+            col_widths = []
+            for i in range(n_cols):
+                max_w = display_width(headers[i])
+                for row in rows:
+                    w = display_width(row[i])
+                    if w > max_w:
+                        max_w = w
+                col_widths.append(max_w + 2)  # 加2个空格作为内边距
+        # 构建表格
+        sep = "+" + "+".join("-" * w for w in col_widths) + "+"
+        # 表头
+        header_cells = []
+        for i, h in enumerate(headers):
+            w = col_widths[i]
+            str_h = str(h)
+            # 计算当前字符串显示宽度
+            cur_w = display_width(str_h)
+            pad = w - cur_w
+            left_pad = pad // 2
+            right_pad = pad - left_pad
+            header_cells.append(" " * left_pad + str_h + " " * right_pad)
+        header_line = "|" + "|".join(header_cells) + "|"
+        lines = [sep, header_line, sep]
+        # 数据行
+        for row in rows:
+            cells = []
+            for i, cell in enumerate(row):
+                w = col_widths[i]
+                str_cell = str(cell)
+                cur_w = display_width(str_cell)
+                pad = w - cur_w
+                # 左对齐
+                cells.append(str_cell + " " * pad)
+            line = "|" + "|".join(cells) + "|"
+            lines.append(line)
+        lines.append(sep)
+        return "\n".join(lines)
+
+    def generate_uniform_points_avoid_data(self, t_min, t_max, n_points, data_times, shrink_ratio=0.02):
+        if n_points <= 0:
+            return []
+        if n_points == 1:
+            t_mid = (t_min + t_max) / 2
+            for dt in data_times:
+                if abs(t_mid - dt) < 1e-6:
+                    t_mid += (t_max - t_min) * 0.001
+                    break
+            return [t_mid]
+        offset = (t_max - t_min) * shrink_ratio
+        t_start = t_min + offset
+        t_end = t_max - offset
+        if t_start >= t_end:
+            t_start = t_min
+            t_end = t_max
+        points = np.linspace(t_start, t_end, n_points)
+        epsilon = (t_max - t_min) * 1e-4
+        for i in range(len(points)):
+            for dt in data_times:
+                if abs(points[i] - dt) < 1e-6:
+                    points[i] += epsilon
+                    break
+        return points.tolist()
+
+    def format_scientific(self, value, decimal=2):
+        if value == 0:
+            return "0"
+        exponent = int(np.floor(np.log10(abs(value))))
+        mantissa = value / (10 ** exponent)
+        mantissa_str = f"{mantissa:.{decimal}f}"
+        exp_str = f"{exponent}"
+        if exponent >= 0:
+            exp_str = f"+{exponent}"
+        exp_display = exp_str.replace('-', '⁻')
+        return f"{mantissa_str}×10{exp_display}"
+
+    def calculate_all(self):
+        try:
+            from scipy.interpolate import CubicSpline
+        except ImportError:
+            messagebox.showerror("缺少依赖", "请先安装 scipy：\npip install scipy")
+            return
+
+        try:
+            # 读取参数
+            k = 1.0
+            d0 = float(self.d0_entry.get())
+            theta0 = float(self.theta0_entry.get())
+            n_points = int(self.n_points_entry.get())
+            if n_points < 2:
+                n_points = 5
+
+            # 读取冷却数据
+            time_text = self.time_entry.get("1.0", tk.END).strip()
+            d_text = self.d_entry.get("1.0", tk.END).strip()
+            times = self.parse_float_list(time_text, "时间数据")
+            d_vals = self.parse_float_list(d_text, "光标位置数据")
+            if len(times) != len(d_vals):
+                raise ValueError(f"时间数据个数({len(times)})与光标数据个数({len(d_vals)})不一致")
+            if len(times) < 3:
+                raise ValueError("至少需要3个数据点才能进行样条插值")
+
+            delta_theta = k * (np.array(d_vals) - d0)
+            cs = CubicSpline(times, delta_theta, bc_type='natural')
+
+            t_min = min(times)
+            t_max = max(times)
+            selected_t = self.generate_uniform_points_avoid_data(t_min, t_max, n_points, times, shrink_ratio=0.02)
+            selected_dtheta = cs(selected_t)
+            slopes = cs.derivative()(selected_t)
+
+            tangents = []
+            for i in range(n_points):
+                t0 = selected_t[i]
+                dt0 = selected_dtheta[i]
+                slope = slopes[i]
+                b = dt0 - slope * t0
+                tangents.append((t0, dt0, slope, b))
+
+            # 冷却曲线图
+            self.ax1.clear()
+            t_smooth = np.linspace(t_min, t_max, 300)
+            theta_smooth = cs(t_smooth)
+            self.ax1.plot(t_smooth, theta_smooth, 'b-', linewidth=2, label="样条拟合曲线")
+            if self.show_all_points.get():
+                self.ax1.plot(times, delta_theta, 'ko', markersize=4, label="实验数据点")
+            t_range = np.linspace(t_min - 10, t_max + 50, 200)
+            for i, (t0, dt0, slope, b) in enumerate(tangents):
+                y_tan = slope * t_range + b
+                self.ax1.plot(t_range, y_tan, 'r--', linewidth=1.2, alpha=0.8, label=f"切线 {i + 1}" if i == 0 else "")
+                self.ax1.plot(t0, dt0, 'ro', markersize=8, markeredgecolor='darkred')
+                self.ax1.annotate(f'P{i + 1}:({t0:.1f},{dt0:.1f})', xy=(t0, dt0), xytext=(5, 5),
+                                  textcoords='offset points', fontsize=8, color='darkred')
+            all_dt = selected_dtheta
+            x_min = min(selected_t) - 10
+            x_max = max(selected_t) + 50
+            y_min = min(all_dt) - 5
+            y_max = max(all_dt) + 10
+            self.ax1.set_xlim(x_min, x_max)
+            self.ax1.set_ylim(y_min, y_max)
+            self.ax1.set_xlabel("时间 t (s)", fontsize=10)
+            self.ax1.set_ylabel("温差 Δθ (℃)", fontsize=10)
+            self.ax1.set_title(f"铜样品冷却曲线 (三次样条插值, {n_points}个均匀切点)", fontsize=10)
+            self.ax1.grid(True, linestyle='--', alpha=0.6)
+            self.ax1.legend(loc='best')
+            self.canvas1.draw()
+
+            # 双对数坐标图
+            x_data = selected_dtheta
+            y_data = np.abs(slopes)
+            log_x = np.log(x_data)
+            log_y = np.log(y_data)
+            A = np.vstack([log_x, np.ones(len(log_x))]).T
+            a_ls, b_ls = np.linalg.lstsq(A, log_y, rcond=None)[0]
+            x1_fit = min(x_data)
+            x2_fit = max(x_data)
+            y1_fit = np.exp(a_ls * np.log(x1_fit) + b_ls)
+            y2_fit = np.exp(a_ls * np.log(x2_fit) + b_ls)
+            alpha = (np.log(y2_fit) - np.log(y1_fit)) / (np.log(x2_fit) - np.log(x1_fit))
+            ln_K = np.log(y1_fit) - alpha * np.log(x1_fit)
+            K = np.exp(ln_K)
+
+            self.ax2.clear()
+            self.ax2.loglog(x_data, y_data, 'bo', label="均匀切点", markersize=6)
+            for i, (x, y) in enumerate(zip(x_data, y_data)):
+                self.ax2.annotate(f'({x:.1f},{y:.2g})', xy=(x, y), xytext=(3, 3), textcoords='offset points',
+                                  fontsize=8, color='blue')
+            x_fit_line = np.logspace(np.log10(min(x_data)), np.log10(max(x_data)), 100)
+            y_fit_line = K * (x_fit_line ** alpha)
+            self.ax2.loglog(x_fit_line, y_fit_line, 'r-', linewidth=1.5, label="拟合直线")
+            self.ax2.plot(x1_fit, y1_fit, 'rs', markersize=6, label="取点1")
+            self.ax2.plot(x2_fit, y2_fit, 'rs', markersize=6, label="取点2")
+            self.ax2.annotate(f'({x1_fit:.1f},{y1_fit:.2g})', xy=(x1_fit, y1_fit), xytext=(5, 5),
+                              textcoords='offset points', fontsize=8, color='red')
+            self.ax2.annotate(f'({x2_fit:.1f},{y2_fit:.2g})', xy=(x2_fit, y2_fit), xytext=(5, 5),
+                              textcoords='offset points', fontsize=8, color='red')
+            x_min_log = max(0.5, min(x_data) * 0.8)
+            x_max_log = max(x_data) * 1.2
+            y_min_log = max(0.0005, min(y_data) * 0.8)
+            y_max_log = max(y_data) * 1.2
+            self.ax2.set_xlim(x_min_log, x_max_log)
+            self.ax2.set_ylim(y_min_log, y_max_log)
+            self.ax2.axhline(y=1e-3, color='gray', linestyle=':', linewidth=0.8, alpha=0.5)
+            self.ax2.axvline(x=1, color='gray', linestyle=':', linewidth=0.8, alpha=0.5)
+            self.ax2.text(1, y_min_log * 1.5, '10^0', fontsize=8, ha='center')
+            self.ax2.text(x_min_log * 1.5, 1e-3, '10^{-3}', fontsize=8, va='center')
+            self.ax2.set_xlabel("温差 Δθ (℃)", fontsize=10)
+            self.ax2.set_ylabel("冷却速率 |dΔθ/dt| (℃/s)", fontsize=10)
+            self.ax2.set_title(f"双对数坐标图 (基于{n_points}个均匀切点)", fontsize=10)
+            self.ax2.grid(True, which='both', linestyle='--', alpha=0.5)
+            self.ax2.legend()
+            self.canvas2.draw()
+
+            # 表21.3
+            table21_3_headers = ["时间 t (s)", "光标 d (格)", "温差 Δθ (℃)"]
+            table21_3_rows = [(times[i], d_vals[i], f"{delta_theta[i]:.2f}") for i in range(len(times))]
+            table21_3 = self.format_table(table21_3_headers, table21_3_rows, col_widths=[12, 12, 12])
+
+            # 表21.4 纵向排列，横向对比切点 - 使用改进的表格函数
+            param_names = [
+                "切点位置纵坐标值 (θ-θ₀)/℃",
+                "切线与纵轴交点纵坐标值 (θ'-θ₀)/℃",
+                "切线与横轴交点横坐标值 t'/s",
+                "切线与横轴交点纵坐标值 (θ''-θ₀)/℃",
+                "切线与横轴交点横坐标值 t''/s",
+                "Δθ = θ' - θ'' /℃",
+                "Δt = t' - t'' /s",
+                "Δθ/Δt / (℃/s)"
+            ]
+            rows_data = []
+            for i, (t0, dt0, slope, b) in enumerate(tangents):
+                theta_prime = b
+                t_double = -b / slope if slope != 0 else np.inf
+                theta_double = 0.0
+                t_prime = 0.0
+                delta_theta_val = theta_prime - theta_double
+                delta_t = t_prime - t_double
+                abs_slope = abs(slope)
+                rows_data.append([
+                    f"{dt0:.1f}", f"{theta_prime:.1f}", f"{t_prime:.1f}", f"{theta_double:.1f}",
+                    f"{t_double:.1f}" if t_double != np.inf else "∞",
+                    f"{delta_theta_val:.1f}", f"{delta_t:.1f}",
+                    f"{abs_slope:.2g}" if abs_slope != 0 else "0"
+                ])
+            # 转置
+            transposed = []
+            for p in range(len(param_names)):
+                row = [param_names[p]]
+                for c in range(len(tangents)):
+                    row.append(rows_data[c][p])
+                transposed.append(row)
+            headers_21_4 = ["参数"] + [f"A{i + 1}" for i in range(len(tangents))]
+            # 使用改进的 format_table 自动处理对齐
+            table21_4 = self.format_table(headers_21_4, transposed)
+
+            # 切点坐标汇总
+            coord_summary = f"【均匀切点坐标汇总（共{n_points}个，已避开原始数据点）】\n"
+            coord_summary += "冷却曲线上的切点 (t, Δθ):\n"
+            for i, (t0, dt0) in enumerate(zip(selected_t, selected_dtheta)):
+                coord_summary += f"  切点 P{i + 1}: t = {t0:.2f} s, Δθ = {dt0:.2f} ℃\n"
+            coord_summary += "\n双对数坐标下的点 (Δθ, |dΔθ/dt|):\n"
+            for i, (x, y) in enumerate(zip(selected_dtheta, np.abs(slopes))):
+                coord_summary += f"  点 P{i + 1}: Δθ = {x:.1f} ℃, |dΔθ/dt| = {y:.2g} ℃/s\n"
+            coord_summary += "\n"
+
+            # 样品数据
+            mCu = float(self.mCu_entry.get())
+            dtCu_raw = self.parse_float_list(self.dtCu_entry.get(), "铜Δt数据")
+            dtCu_avg = np.mean(dtCu_raw)
+            mFe = float(self.mFe_entry.get())
+            dtFe_raw = self.parse_float_list(self.dtFe_entry.get(), "铁Δt数据")
+            dtFe_avg = np.mean(dtFe_raw)
+            mAl = float(self.mAl_entry.get())
+            dtAl_raw = self.parse_float_list(self.dtAl_entry.get(), "铝Δt数据")
+            dtAl_avg = np.mean(dtAl_raw)
+
+            c_Cu = 0.395
+            c_Fe = (mCu * dtCu_avg) / (mFe * dtFe_avg) * c_Cu
+            c_Al = (mCu * dtCu_avg) / (mAl * dtAl_avg) * c_Cu
+            c_Fe_std = 0.462
+            c_Al_std = 0.941
+            err_Fe_abs = abs((c_Fe - c_Fe_std) / c_Fe_std * 100)
+            err_Al_abs = abs((c_Al - c_Al_std) / c_Al_std * 100)
+            err_Fe_str = f"{err_Fe_abs:.2g}%"
+            err_Al_str = f"{err_Al_abs:.2g}%"
+
+            table21_5_headers = ["样品", "质量/g", "Δt₁/s", "Δt₂/s", "Δt₃/s", "Δt平均/s", "比热容 kJ/(kg·K)",
+                                 "相对误差 %"]
+            table21_5_rows = [
+                ["Cu", f"{mCu:.2f}", f"{dtCu_raw[0]:.2f}", f"{dtCu_raw[1]:.2f}", f"{dtCu_raw[2]:.2f}",
+                 f"{dtCu_avg:.2f}", f"{c_Cu:.3f}", "--"],
+                ["Fe", f"{mFe:.2f}", f"{dtFe_raw[0]:.2f}", f"{dtFe_raw[1]:.2f}", f"{dtFe_raw[2]:.2f}",
+                 f"{dtFe_avg:.2f}", f"{c_Fe:.4f}", err_Fe_str],
+                ["Al", f"{mAl:.2f}", f"{dtAl_raw[0]:.2f}", f"{dtAl_raw[1]:.2f}", f"{dtAl_raw[2]:.2f}",
+                 f"{dtAl_avg:.2f}", f"{c_Al:.4f}", err_Al_str]
+            ]
+            table21_5 = self.format_table(table21_5_headers, table21_5_rows, col_widths=[8, 10, 10, 10, 10, 12, 16, 12])
+
+            # 详细计算过程（补充公式）
+            calc_details = "【比热容详细计算过程】\n\n"
+            # 铜
+            calc_details += "铜 (Cu) Δt 平均值计算：\n"
+            calc_details += f"  公式：Δt_Cu = (Δt₁ + Δt₂ + Δt₃) / 3\n"
+            calc_details += f"  代入：Δt_Cu = ({dtCu_raw[0]:.2f} + {dtCu_raw[1]:.2f} + {dtCu_raw[2]:.2f}) / 3 = {dtCu_avg:.2f} s\n\n"
+            # 铁
+            calc_details += "铁 (Fe) Δt 平均值计算：\n"
+            calc_details += f"  公式：Δt_Fe = (Δt₁ + Δt₂ + Δt₃) / 3\n"
+            calc_details += f"  代入：Δt_Fe = ({dtFe_raw[0]:.2f} + {dtFe_raw[1]:.2f} + {dtFe_raw[2]:.2f}) / 3 = {dtFe_avg:.2f} s\n\n"
+            # 铝
+            calc_details += "铝 (Al) Δt 平均值计算：\n"
+            calc_details += f"  公式：Δt_Al = (Δt₁ + Δt₂ + Δt₃) / 3\n"
+            calc_details += f"  代入：Δt_Al = ({dtAl_raw[0]:.2f} + {dtAl_raw[1]:.2f} + {dtAl_raw[2]:.2f}) / 3 = {dtAl_avg:.2f} s\n\n"
+
+            # 铁比热容
+            calc_details += "铁 (Fe) 比热容计算：\n"
+            calc_details += f"  公式：c_Fe = (m_Cu × Δt_Cu) / (m_Fe × Δt_Fe) × c_Cu\n"
+            calc_details += f"  代入：c_Fe = ({mCu:.2f} × {dtCu_avg:.2f}) / ({mFe:.2f} × {dtFe_avg:.2f}) × {c_Cu}\n"
+            numerator_Fe = mCu * dtCu_avg
+            denominator_Fe = mFe * dtFe_avg
+            calc_details += f"  分子 = {mCu:.2f} × {dtCu_avg:.2f} = {numerator_Fe:.4f}\n"
+            calc_details += f"  分母 = {mFe:.2f} × {dtFe_avg:.2f} = {denominator_Fe:.4f}\n"
+            calc_details += f"  比值 = {numerator_Fe:.4f} / {denominator_Fe:.4f} = {numerator_Fe / denominator_Fe:.4f}\n"
+            calc_details += f"  c_Fe = {numerator_Fe / denominator_Fe:.4f} × {c_Cu} = {c_Fe:.4f} kJ/(kg·K)\n"
+            calc_details += f"  标准值 c_Fe_std = {c_Fe_std} kJ/(kg·K)\n"
+            calc_details += f"  相对误差 E_Fe = |(c_Fe - c_Fe_std) / c_Fe_std| × 100% = |({c_Fe:.4f} - {c_Fe_std}) / {c_Fe_std}| × 100% = {err_Fe_str}\n\n"
+
+            # 铝比热容
+            calc_details += "铝 (Al) 比热容计算：\n"
+            calc_details += f"  公式：c_Al = (m_Cu × Δt_Cu) / (m_Al × Δt_Al) × c_Cu\n"
+            calc_details += f"  代入：c_Al = ({mCu:.2f} × {dtCu_avg:.2f}) / ({mAl:.2f} × {dtAl_avg:.2f}) × {c_Cu}\n"
+            numerator_Al = mCu * dtCu_avg
+            denominator_Al = mAl * dtAl_avg
+            calc_details += f"  分子 = {mCu:.2f} × {dtCu_avg:.2f} = {numerator_Al:.4f}\n"
+            calc_details += f"  分母 = {mAl:.2f} × {dtAl_avg:.2f} = {denominator_Al:.4f}\n"
+            calc_details += f"  比值 = {numerator_Al:.4f} / {denominator_Al:.4f} = {numerator_Al / denominator_Al:.4f}\n"
+            calc_details += f"  c_Al = {numerator_Al / denominator_Al:.4f} × {c_Cu} = {c_Al:.4f} kJ/(kg·K)\n"
+            calc_details += f"  标准值 c_Al_std = {c_Al_std} kJ/(kg·K)\n"
+            calc_details += f"  相对误差 E_Al = |(c_Al - c_Al_std) / c_Al_std| × 100% = |({c_Al:.4f} - {c_Al_std}) / {c_Al_std}| × 100% = {err_Al_str}\n\n"
+
+            # 双对数斜率计算过程
+            slope_calc = "【双对数图斜率计算（取点法）】\n"
+            slope_calc += f"在拟合直线上选取两个相隔较远的非数据点：\n"
+            slope_calc += f"  点1: (Δθ₁, |dΔθ/dt|₁) = ({x1_fit:.1f}, {y1_fit:.2g})\n"
+            slope_calc += f"  点2: (Δθ₂, |dΔθ/dt|₂) = ({x2_fit:.1f}, {y2_fit:.2g})\n"
+            slope_calc += f"根据公式 α = [ln(|dΔθ/dt|₂) - ln(|dΔθ/dt|₁)] / [ln(Δθ₂) - ln(Δθ₁)]\n"
+            slope_calc += f"  ln(|dΔθ/dt|₂) = {np.log(y2_fit):.4f}, ln(|dΔθ/dt|₁) = {np.log(y1_fit):.4f}\n"
+            slope_calc += f"  ln(Δθ₂) = {np.log(x2_fit):.4f}, ln(Δθ₁) = {np.log(x1_fit):.4f}\n"
+            slope_calc += f"  α = ({np.log(y2_fit):.4f} - {np.log(y1_fit):.4f}) / ({np.log(x2_fit):.4f} - {np.log(x1_fit):.4f}) = {alpha:.4f}\n"
+            alpha_rounded = round(alpha, 2)
+            slope_calc += f"保留两位小数得 α = {alpha_rounded}\n\n"
+            ln_K_rounded = round(ln_K, 2)
+            K_rounded = np.exp(ln_K_rounded)
+            K_sci = self.format_scientific(K_rounded, 2)
+            slope_calc += f"截距 ln(aS/(mc)) = {ln_K_rounded:.2f} → aS/(mc) = {K_sci} ℃^(1-α)/s\n"
+            slope_calc += f"铜样品冷却经验公式: dΔθ/dt = {K_sci} · (Δθ)^{alpha_rounded}\n\n"
+
+            # 最终报告
+            result = "=" * 80 + "\n"
+            result += "                    冷却法测金属比热容 - 完整数据处理报告\n"
+            result += "                     (样条插值 + 均匀切点，双对数坐标)\n"
+            result += "=" * 80 + "\n\n"
+            result += f"实验条件: 室温 θ₀ = {theta0} ℃, 定标系数 k = {k} ℃/格, 零位 d₀ = {d0} 格\n"
+            result += f"温差公式: Δθ = k × (d - d₀) = d - ({d0}) ℃\n"
+            result += f"均匀切点数量: {n_points} (在时间区间 [{t_min:.1f}, {t_max:.1f}] s 内等间距选取，已避开原始数据点)\n\n"
+            result += "【表21.3】原始测量数据\n"
+            result += table21_3 + "\n\n"
+            result += "【表21.4】铜样品冷却定律数据（切线法）\n"
+            result += table21_4 + "\n\n"
+            result += coord_summary
+            result += slope_calc
+            result += calc_details
+            result += "【表21.5】金属Fe和Al的比热容测量结果汇总\n"
+            result += "注：Δt 为样品从102℃降至98℃所需时间。\n"
+            result += table21_5 + "\n\n"
+            result += "=" * 80 + "\n"
+            result += "计算完成！\n"
+            result += "=" * 80
+
+            self.result_text.delete(1.0, tk.END)
+            self.result_text.insert(tk.END, result)
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            messagebox.showerror("计算错误",
+                                 f"数据处理失败：\n{str(e)}\n\n请检查：\n1. 数据个数是否足够（至少3个）\n2. 零位 d₀ 设置是否合理（温差应为正）\n3. 是否已安装 scipy (pip install scipy)")
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = CoolingExperimentApp(root)
+    root.mainloop()
